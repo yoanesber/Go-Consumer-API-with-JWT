@@ -1,37 +1,34 @@
-# Transaction Processing Service (Go + Redis + PostgreSQL + Kafka)
+# Consumer API Service with JWT Authorization (Go + PostgreSQL)
 
-This service is responsible for processing **financial transactions** in a **secure** and **idempotent** manner. Each transaction request must include a valid **JWT token** and an **Idempotency-Key** to ensure safe retries and prevent duplicate processing. The system uses **Redis** for fast **idempotency checking** and **Kafka** for **asynchronous background processing** of pending transactions.
-
-Incoming transactions are **validated, persisted, and queued** for processing. A background scheduler pulls **"processing"** transactions periodically and attempts to complete them via a third-party API.
+This service provides a secure and efficient RESTful API for managing **consumer data**, built with **Go (Gin framework)** and **PostgreSQL**. It implements **JWT-based authentication and authorization**, ensuring that only authenticated clients can access protected endpoints.
 
 ---
 
 
 ## ✨ Features
 
-This application provides a **secure**, **token-based authentication system using JWT (JSON Web Tokens)**, **fully integrated with Redis** for optimized token handling, and **PostgreSQL** for persistent storage. Below is a summary of the core features offered:
+This application delivers a simple yet robust JWT-based authentication flow, with PostgreSQL as the primary datastore. Below is an overview of the core features:
 
 ### 🔐 JWT Authentication
 
 - Full **JWT authentication** system: 
-  - This service secures its API endpoints using JWT (JSON Web Token). Every request must include a valid JWT token in the `Authorization` header (`Bearer <token>`).
+  - Protects API endpoints using **JSON Web Tokens (JWT)**.
+  - All secured requests must include a valid JWT in the `Authorization` header (`Bearer <token>`).
   - The token is verified before any processing happens, and requests with missing or invalid tokens receive a `401 Unauthorized` response.
   - Ensure only authenticated users can interact with the transaction API.
   - Helps trace and attribute transactions to specific authenticated consumers or services.
-  - `POST /auth/login` — Accepts `username` and `password`, returns:
+
+- **Authentication Endpoints**:
+  - `POST /auth/login` — Authenticates user with `username` and `password`, returns, returns:
     - `AccessToken`
     - `RefreshToken`
     - `ExpirationDate`
     - `TokenType`
-  - `POST /auth/refresh-token` — Accepts valid `RefreshToken` to generate new `AccessToken`.
+  - `POST /auth/refresh-token` — Accepts a valid `RefreshToken` and issues a new `AccessToken`.
 
-- **Token storage in Redis** for faster access:
-  - Stored under key format: `access_token:<username>`
-  - JSON structure: `{ AccessToken, RefreshToken, ExpirationDate, TokenType }`
-
-- **RSA key pairs** are used for signing JWTs (instead of symmetric secrets)
-- Keys are generated using OpenSSL:
-  - `privateKey.pem`, `publicKey.pem` in `/keys`
+- **RSA key pairs** are used to sign and verify tokens (more secure than symmetric secrets)
+  - Stored in `/keys` directory: `privateKey.pem` and `publicKey.pem`
+  - Keys are generated using `OpenSSL`
 
 
 ### 🛡️ Security & Middleware
@@ -46,45 +43,6 @@ The service is designed with security and extensibility in mind, using several m
   - CORS
   - Secure HTTP headers (e.g., `X-Frame-Options`, `X-Content-Type-Options`, etc.)
 
-- **Rate Limiter**:
-  - Built on `golang.org/x/time/rate`
-  - Rate limits based on unique key: `IP + HTTP method + route path`
-
-
-### ♻️ Idempotency Enforcement  
-
-Each transaction request must include an `Idempotency-Key` (UUID). The service ensures the same key cannot be used to create multiple logically different transactions, preventing accidental duplicates on retries.  
-- How it works:
-  - The raw request body is hashed (SHA-256).
-  - Redis is queried for `idempotency_cache:<Idempotency-Key>`.  
-  - Purpose:  
-    - Prevents duplicate charges/payments on retries.  
-    - Guarantees safe retries on network failure or client timeouts.  
-  - All idempotency data (key, hash, and response) is saved in `PostgreSQL` and also cached in `Redis` for fast lookup. This dual approach ensures:
-    - Durability (in DB)
-    - Performance (in Redis)
-
-
-### 📬 Kafka Integration for Async Event-Driven Processing
-
-- Once a new transaction is stored, an event containing the transaction metadata is published to a Kafka topic based on its type:
-  - `payment-event`, `withdrawal-event`, or `disbursement-event`
-- Kafka consumers listen to these topics, extract the event, and begin processing it asynchronously
-- Purpose:
-  - Decouples immediate request handling from long-running transaction finalization.
-  - Enables scalability and retry-friendly design via Kafka's durability
-
-
-### ⏱ Goroutine-Based Periodic Scheduler
-
-A built-in scheduler runs every 5 seconds using goroutines to process transactions in the `"processing"` state. Each cycle:
-- Queries at most 5 processing transactions
-- Sends them to external services
-- Updates their status to `"completed"` or `"failed"` based on the response
-- Purpose:
-  - Allows distributed or delayed processing independent of user requests
-  - Ensures eventual consistency and resilience if previous attempts failed
-
 
 ### 🗄️ Logging
 
@@ -97,91 +55,51 @@ A built-in scheduler runs every 5 seconds using goroutines to process transactio
 
 ## 🧭 Business Process Flow
 
-The following diagram illustrates the end-to-end flow of how a new transaction request is handled by the system, from initial client submission to background processing and external integration. It highlights key components such as authentication, idempotency validation, asynchronous messaging with Kafka, and scheduled processing of pending transactions.
+The following flow illustrates how clients interact with the API for **authentication** and **consumer management**. The system enforces **JWT-based authorization** and **role-based access control (RBAC)** to protect resources.
 
 ```pgsql
 ┌──────────────────────────────────────────────┐
-│            [1] Client Sends Request          │
+│           [1] User Logs In                   │
 │----------------------------------------------│
-│ - POST /transactions                         │
-│ - Headers:                                   │
-│   - Authorization: Bearer <JWT>              │
-│   - Idempotency-Key: <UUID>                  │
-│ - Body: { type, amount, consumerId }         │
+│ - POST /auth/login                           │
+│ - Body: { username, password }               │
 └──────────────────────────────────────────────┘
               │
               ▼
 ┌──────────────────────────────────────────────┐
-│  [2] Middleware: Validate JWT & Idempotency  │
+│       [2] JWT Token Generation               │
 │----------------------------------------------│
-│ - Check JWT validity → if invalid → 401      │
-│ - Check Idempotency-Key format → if invalid →│
-│   400                                        │
+│ - If credentials valid:                      │
+│   → issue AccessToken & RefreshToken         │
+│ - If invalid: respond with 401               │
 └──────────────────────────────────────────────┘
               │
               ▼
 ┌──────────────────────────────────────────────┐
-│   [3] Redis Check: Idempotency-Key Exists?   │
+│ [3] Access Protected Consumer API Endpoint   │
 │----------------------------------------------│
-│ - Yes → Compare hash                         │
-│   - Same → Return cached response            │
-│   - Diff → Return 409 Conflict               │
-│ - No  → Continue to processing               │
+│ - Include AccessToken in header:             │
+│   Authorization: Bearer <access_token>       │
 └──────────────────────────────────────────────┘
               │
               ▼
 ┌──────────────────────────────────────────────┐
-│           [4] Context Injection              │
+│ [4] Middleware: JWT & Role Authorization     │
 │----------------------------------------------│
-│ - Inject Idempotency-Key and hashed body     │
-│   into context for downstream use            │
+│ - Validate JWT signature & expiry            │
+│ - Check user's role (e.g., ROLE_ADMIN)       │
+│ - If unauthorized: respond 403 or 401        │
 └──────────────────────────────────────────────┘
               │
               ▼
 ┌──────────────────────────────────────────────┐
-│     [5] Service Layer: Business Validation   │
+│    [5] Handler Executes Requested Action     │
 │----------------------------------------------│
-│ - Check consumerId exists → if not → 404     │
-│ - Check consumer is active → if not → 400    │
-└──────────────────────────────────────────────┘
-              │
-              ▼
-┌──────────────────────────────────────────────┐
-│   [6] Save Transaction & Idempotency Record  │
-│----------------------------------------------│
-│ - Insert into transactions (status = pending)│
-│ - Insert into idempotency_cache (key, hash,  │
-│   response)                                  │
-│ - Save response to Redis                     │
-└──────────────────────────────────────────────┘
-              │
-              ▼
-┌──────────────────────────────────────────────┐
-│      [7] Kafka: Publish Event                │
-│----------------------------------------------│
-│ - topic = payment-event / withdrawal-event / │
-│   disbursement-event                         │
-│ - Payload: transactionId, key, status, type  │
-└──────────────────────────────────────────────┘
-              │
-              ▼
-┌──────────────────────────────────────────────┐
-│      [8] Kafka Consumer Handles Event        │
-│----------------------------------------------│
-│ - Listens on specific topic                  │
-│ - Parse event & call handler                 │
-│ - Handler sets status = "processing"         │
-└──────────────────────────────────────────────┘
-              │
-              ▼
-┌──────────────────────────────────────────────┐
-│  [9] Scheduler (every 5s): Poll Transactions │
-│----------------------------------------------│
-│ - Query: transactions where status=processing│
-│ - For each (limit 5):                        │
-│   - Call external API                        │
-│   - On success → status = completed          │
-│   - On fail    → status = failed             │
+│ - GET /consumers → list all (ADMIN/USER)     │
+│ - GET /consumers/:id → detail (ADMIN/USER)   │
+│ - GET /consumers/active|inactive|suspended   │
+│ - POST /consumers → create (ADMIN only)      │
+│ - PATCH /consumers/:id → update status       │
 └──────────────────────────────────────────────┘
 
 ```
@@ -198,13 +116,9 @@ This project leverages a modern and robust set of technologies to ensure perform
 | **Web Framework**         | Gin, a fast and minimalist HTTP web framework for Go                                        |
 | **ORM**                   | GORM, an ORM library for Go supporting SQL and migrations                                   |
 | **Database**              | PostgreSQL, a powerful open-source relational database system                               |
-| **Cache/Session Store**   | Redis, used for caching, fast idempotency key lookup, and storing temporary session/state   |
 | **JWT Signing**           | RSA asymmetric key pairs generated via OpenSSL, used to securely sign and verify JWT tokens |
 | **Logging**               | Logrus for structured logging, combined with Lumberjack for log rotation                    |
 | **Validation**            | `go-playground/validator.v9` for input validation and data integrity enforcement            |
-| **Scheduler**             | Custom scheduler using time.Ticker + goroutines to poll pending transactions periodically   |
-| **Message Broker**        | Kafka, used for publishing and consuming transaction events asynchronously                  |
-| **Rate Limiting**         | `golang.org/x/time/rate` — token-bucket rate limiter to control API usage frequency         |
 
 ---
 
@@ -217,13 +131,10 @@ This project follows a **modular** and **maintainable** architecture inspired by
 ├── 📂cert/                                 # Stores self-signed TLS certificates used for local development (e.g., for HTTPS or JWT signing verification)
 ├── 📂cmd/                                  # Contains the application's entry point.
 ├── 📂config/
-│   ├── 📂async/                            # Config for async-related components, like Kafka producer/consumer settings
-│   ├── 📂cache/                            # Config for Redis (host, port, TTL, etc.)
 │   └── 📂database/                         # Config for PostgreSQL (DSN, pool settings, migration, etc.)
 ├── 📂docker/                               # Docker-related configuration for building and running services
 │   ├── 📂app/                              # Contains Dockerfile to build the main Go application image
-│   ├── 📂postgres/                         # Contains PostgreSQL container configuration
-│   └── 📂redis/                            # Contains Redis container configuration
+│   └── 📂postgres/                         # Contains PostgreSQL container configuration
 ├── 📂internal/                             # Core domain logic and business use cases, organized by module
 │   ├── 📂entity/                           # Data models/entities representing business concepts like Transaction, Consumer
 │   ├── 📂handler/                          # HTTP handlers (controllers) that parse requests and return responses
@@ -235,26 +146,14 @@ This project follows a **modular** and **maintainable** architecture inspired by
 │   ├── 📂contextdata/                      # Stores and retrieves contextual data like Idempotency-Key, UserID, RequestID
 │   ├── 📂customtype/                       # Defines custom types, enums, constants used throughout the application
 │   ├── 📂diagnostics/                      # Health check endpoints, metrics, and diagnostics handlers for monitoring
-│   ├── 📂kafka/
-│   │   ├── 📂consumer/                     # Handles message consumption and dispatch
-│   │   ├── 📂mapping/                      # Maps events between internal and Kafka schemas
-│   │   ├── 📂publisher/                    # Sends messages to Kafka topics
-│   │   ├── 📂schema/                       # Defines event schemas used in Kafka messaging
-│   │   └── 📂validator/                    # Validates Kafka messages against schema
 │   ├── 📂logger/                           # Centralized log initialization and configuration
 │   ├── 📂middleware/                       # Request processing middleware
 │   │   ├── 📂authorization/                # JWT validation and Role-Based Access Control (RBAC)
 │   │   ├── 📂headers/                      # Manages request headers like CORS, security, request ID
-│   │   ├── 📂idempotency/                  # Extracts, validates, and processes Idempotency-Key
-│   │   ├── 📂logging/                      # Logs incoming requests
-│   │   └── 📂ratelimiter/                  # Implements API rate limiting based on IP, path, and method
-│   ├── 📂scheduler/                        # Custom background schedulers that run periodically (e.g., every 5s) to process pending transactions
+│   │   └── 📂logging/                      # Logs incoming requests
 │   └── 📂util/                             # General utility functions and helpers
-│       ├── 📂hash-util/                    # Functions for hashing request bodies (e.g., SHA-256)
 │       ├── 📂http-util/                    # Utilities for common HTTP tasks (e.g., write JSON, status helpers)
 │       ├── 📂jwt-util/                     # Token generation, parsing, and validation logic
-│       ├── 📂kafka-util/                   # Kafka configuration and utility helpers
-│       ├── 📂redis-util/                   # Redis connection and command utilities
 │       └── 📂validation-util/              # Common input validators (e.g., UUID, numeric range)
 ├── 📂routes/                               # Route definitions, groups APIs, and applies middleware per route scope
 └── 📂tests/                                # Contains unit or integration tests for business logic
@@ -274,14 +173,21 @@ Make sure the following tools are installed on your system:
 |---------------------------------------------------------------|-------------------------------------------|
 | [Go](https://go.dev/dl/)                                      | Go programming language (v1.20+)          |
 | [Make](https://www.gnu.org/software/make/)                    | Build automation tool (`make`)            |
-| [Redis](https://redis.io/)                                    | In-memory data store                      |
 | [PostgreSQL](https://www.postgresql.org/)                     | Relational database system (v14+)         |
-| [Apache Kafka](https://kafka.apache.org/)                     | Distributed event streaming platform for async processing |
 | [Docker](https://www.docker.com/)                             | Containerization platform (optional)      |
+
+### 🔁 Clone the Project  
+
+Clone the repository:  
+
+```bash
+git clone https://github.com/yoanesber/Go-Consumer-API-with-JWT.git
+cd Go-Consumer-API-with-JWT
+```
 
 ### ⚙️ Configure `.env` File  
 
-Set up your **database**, **Redis**, and **JWT configuration** in `.env` file. Create a `.env` file at the project root directory:  
+Set up your **database** and **JWT configuration** in `.env` file. Create a `.env` file at the project root directory:  
 
 ```properties
 # Application configuration
@@ -297,10 +203,10 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_USER=appuser
 DB_PASS=app@123
-DB_NAME=payment_service
+DB_NAME=consumer_service
 DB_SCHEMA=public
-DB_SSL_MODE=disable
 # Options: disable, require, verify-ca, verify-full
+DB_SSL_MODE=disable
 DB_TIMEZONE=Asia/Jakarta
 DB_MIGRATE=TRUE
 DB_SEED=TRUE
@@ -308,29 +214,8 @@ DB_SEED_FILE=import.sql
 # Set to INFO for development and staging, SILENT for production
 DB_LOG=SILENT
 
-# Redis configuration
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_USER=default
-REDIS_PASS=
-REDIS_DB=0
-REDIS_FLUSH_DB=TRUE
-# 1 hour
-ACCESS_TOKEN_TTL_MINUTES=60
-
-# Kafka configuration
-KAFKA_BROKERS=localhost:9092
-KAFKA_TOPICS=payment-event,withdrawal-event,disbursement-event
-KAFKA_GROUP_ID=transaction-service-group
-KAFKA_READ_TIMEOUT_MS=5000
-KAFKA_WRITE_TIMEOUT_MS=5000
-KAFKA_SSL_ENABLED=FALSE
-KAFKA_SSL_CA_PATH=./cert/kafka/ca.pem
-KAFKA_SSL_CERT_PATH=./cert/kafka/cert.pem
-KAFKA_SSL_KEY_PATH=./cert/kafka/key.pem
-
 # JWT configuration
-JWT_SECRET=your_jwt_secret_key
+JWT_SECRET=a-string-secret-at-least-256-bits-long
 # 2 days
 JWT_EXPIRATION_HOUR=48
 JWT_ISSUER=your_jwt_issuer
@@ -344,11 +229,6 @@ JWT_ALGORITHM=RS256
 # Bearer or JWT
 TOKEN_TYPE=Bearer
 
-# Idempotency configuration
-IDEMPOTENCY_ENABLED=TRUE
-IDEMPOTENCY_KEY_HEADER=Idempotency-Key
-IDEMPOTENCY_PREFIX=idempotency_cache:
-IDEMPOTENCY_TTL_HOURS=24
 ```
 
 - **🔐 Notes**:  
@@ -415,7 +295,7 @@ For security reasons, it's recommended to avoid using the default postgres super
 CREATE USER appuser WITH PASSWORD 'app@123';
 
 -- Allow user to connect to database
-GRANT CONNECT, TEMP, CREATE ON DATABASE payment_service TO appuser;
+GRANT CONNECT, TEMP, CREATE ON DATABASE consumer_service TO appuser;
 
 -- Grant permissions on public schema
 GRANT USAGE, CREATE ON SCHEMA public TO appuser;
@@ -461,7 +341,7 @@ make test
 
 ### 🔧 Run Locally (Non-containerized)
 
-Ensure Redis and PostgreSQL are running locally, then:
+Ensure PostgreSQL are running locally, then:
 
 ```bash
 make run
@@ -469,7 +349,7 @@ make run
 
 ### 🐳 Run Using Docker
 
-To build and run all services (Redis, PostgreSQL, Go app):
+To build and run all services (PostgreSQL, Go app):
 
 ```bash
 make docker-up
@@ -483,9 +363,7 @@ make docker-down
 
 - **Notes**:  
   - Before running the application inside Docker, make sure to update your environment variables `.env`
-    - Change `DB_HOST=localhost` to `DB_HOST=idempotency-postgres`.
-    - Change `REDIS_HOST=localhost` to `REDIS_HOST=idempotency-redis`.
-    - Change `KAFKA_BROKERS=localhost:9092` to `KAFKA_BROKERS=idempotency-kafka:9092`.
+    - Change `DB_HOST=localhost` to `DB_HOST=jwt-postgres`.
 
 ### 🟢 Application is Running
 
@@ -603,40 +481,6 @@ UPDATE users SET is_enabled = false WHERE id = 2;
   "status": 401,
   "data": null,
   "timestamp": "2025-05-23T15:19:24Z"
-}
-```
-
-#### ⏳ Scenario 4: Rate Limit Exceeded on Login
-
-Precondition:
-  - The rate limiter is configured as:
-    - **rate.Limit**: rate.Every(30 * time.Second)
-    - **burst**: 1
-    - **expireAfter**: 5 * time.Minute
-  - **Artinya**: allow `1 request` every `30 seconds`, with a burst capacity of `1`, within a `5-minute` window
-
-**Request**: repeated quickly using valid credentials
-
-```json
-{
-    "username": "admin",
-    "password": "P@ssw0rd"
-}
-```
-
-  - Steps:
-    - Send the request once → receive access token.
-    - Send the same request again shortly after (before 30 seconds pass).
-
-**Response will be**:
-```json
-{
-    "message": "Rate limit exceeded",
-    "error": "You have exceeded the rate limit. Please try again later.",
-    "path": "/auth/login",
-    "status": 429,
-    "data": null,
-    "timestamp": "2025-05-23T16:01:30.407871957Z"
 }
 ```
 
@@ -827,175 +671,5 @@ GET https://localhost:1000/api/v1/consumers?page=1&limit=10
         ...
     ],
     "timestamp": "2025-06-18T13:11:24.539972654Z"
-}
-```
-
-### 💳 Transaction API
-
-All requests below must include a valid JWT token in the `Authorization` header:
-```http
-Authorization: Bearer <valid_token>
-```
-
-Each `POST` request must also include a unique `Idempotency-Key` header to ensure safe retries:
-```http
-Idempotency-Key: <UUID>
-```
-
-#### ✅ Scenario 1: Create a New Transaction with Non-Existent Consumer
-
-**Endpoint**:  
-```http
-POST https://localhost:1000/api/v1/transactions
-```
-
-**Request**:
-```json
-{
-  "type": "payment",
-  "amount": 150000.00,
-  "consumerId": "4c6c42bc-3b82-4f34-9eaf-c4dcfb246ec0"
-}
-```
-
-**Response**:
-```json
-{
-  "message": "Consumer not found",
-  "error": "No consumer found with the given ID",
-  "path": "/api/v1/transactions",
-  "status": 404,
-  "data": null,
-  "timestamp": "2025-06-18T16:02:57.380180455Z"
-}
-```
-
-#### ✅ Scenario 2: Create a New Transaction with Inactive Consumer
-
-**Endpoint**:  
-```http
-POST https://localhost:1000/api/v1/transactions
-```
-
-**Request**:
-```json
-{
-  "type": "payment",
-  "amount": 150000.00,
-  "consumerId": "4c6c42bc-3b82-4f34-9eaf-c4dcfb246ec0"
-}
-```
-
-**Response**:
-```json
-{
-  "message": "Invalid transaction data",
-  "error": "Transaction data is invalid, this could be due to missing required fields or incorrect data types",
-  "path": "/api/v1/transactions",
-  "status": 400,
-  "data": null,
-  "timestamp": "2025-06-18T16:03:23.349569947Z"
-}
-```
-
-#### ✅ Scenario 3: Create a New Transaction Successfully
-
-**Endpoint**:  
-```http
-POST https://localhost:1000/api/v1/transactions
-```
-
-**Request**:
-```json
-{
-  "type": "payment",
-  "amount": 150000.00,
-  "consumerId": "a1b9d37e-2e7d-42b2-9d3e-7b492162905d"
-}
-```
-
-**Response**:
-```json
-{
-  "message": "Transaction created successfully",
-  "error": null,
-  "path": "/api/v1/transactions",
-  "status": 201,
-  "data": {
-    "id": "147735b9-eff7-469d-ac85-3b8108825ce4",
-    "idempotencyCacheKey": "06f14f72-dfba-49ca-aa4e-d85b532ca0b7",
-    "type": "payment",
-    "amount": 150000,
-    "status": "pending",
-    "consumerId": "a1b9d37e-2e7d-42b2-9d3e-7b492162905d",
-    "createdAt": "2025-06-18T16:19:59.952804Z",
-    "updatedAt": "2025-06-18T16:19:59.952804Z"
-  },
-  "timestamp": "2025-06-18T16:20:01.005272013Z"
-}
-```
-
-#### ✅ Scenario 4: Same Idempotency-Key but Different Request
-
-**Endpoint**:  
-```http
-POST https://localhost:1000/api/v1/transactions
-```
-
-**Request**:
-```json
-{
-  "type": "payment",
-  "amount": 170000.00,
-  "consumerId": "a1b9d37e-2e7d-42b2-9d3e-7b492162905d"
-}
-```
-
-**Response**:
-```json
-{
-  "message": "Conflict",
-  "error": "Request with the same Idempotency-Key but different body has already been processed",
-  "path": "/api/v1/transactions",
-  "status": 409,
-  "data": null,
-  "timestamp": "2025-06-18T15:24:50.515722414Z"
-}
-```
-
-#### ✅ Scenario 5: Same Idempotency-Key and Same Request (Previously Failed)
-
-**Endpoint**:  
-```http
-POST https://localhost:1000/api/v1/transactions
-```
-
-**Request**:
-```json
-{
-  "type": "payment",
-  "amount": 150000.00,
-  "consumerId": "a1b9d37e-2e7d-42b2-9d3e-7b492162905d"
-}
-```
-
-**Response**:
-```json
-{
-  "message": "Request already processed",
-  "error": null,
-  "path": "/api/v1/transactions",
-  "status": 200,
-  "data": {
-    "amount": 150000,
-    "consumerId": "a1b9d37e-2e7d-42b2-9d3e-7b492162905d",
-    "createdAt": "2025-06-18T16:19:59.952804Z",
-    "id": "147735b9-eff7-469d-ac85-3b8108825ce4",
-    "idempotencyCacheKey": "06f14f72-dfba-49ca-aa4e-d85b532ca0b7",
-    "status": "failed",
-    "type": "payment",
-    "updatedAt": "2025-06-18T16:20:08.921759395Z"
-  },
-  "timestamp": "2025-06-18T16:21:03.791516931Z"
 }
 ```

@@ -28,7 +28,7 @@ func init() {
 
 func main() {
 	// Create base context with cancel for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
+	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Get environment variables

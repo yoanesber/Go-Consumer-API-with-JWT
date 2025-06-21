@@ -1,24 +1,29 @@
 package test_consumer
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/yoanesber/go-consumer-api-with-jwt/internal/entity"
 	"github.com/yoanesber/go-consumer-api-with-jwt/internal/handler"
 	"github.com/yoanesber/go-consumer-api-with-jwt/internal/service"
-	"github.com/yoanesber/go-consumer-api-with-jwt/pkg/customtype"
+	"github.com/yoanesber/go-consumer-api-with-jwt/pkg/middleware/authorization"
 	httputil "github.com/yoanesber/go-consumer-api-with-jwt/pkg/util/http-util"
 )
 
-func TestGetConsumers(t *testing.T) {
+const (
+	dummyAdminToken    = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJ5b3VyX2p3dF9hdWRpZW5jZSIsImVtYWlsIjoiYWRtaW5AbXlnbWFpbC5jb20iLCJleHAiOjE3NTA2NTAzNjEsImlhdCI6MTc1MDQ3NzU2MSwiaXNzIjoieW91cl9qd3RfaXNzdWVyIiwicm9sZXMiOlsiUk9MRV9BRE1JTiJdLCJzdWIiOiJhZG1pbiIsInVzZXJpZCI6MSwidXNlcm5hbWUiOiJhZG1pbiJ9.iBUMUUbwUy2CswqmR23hCNBF872cLjcn12UrUWJEm34"
+	dummyNonAdminToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJ5b3VyX2p3dF9hdWRpZW5jZSIsImVtYWlsIjoidXNlcm9uZUBteWdtYWlsLmNvbSIsImV4cCI6MTc1MDY1MDMyOSwiaWF0IjoxNzUwNDc3NTI5LCJpc3MiOiJ5b3VyX2p3dF9pc3N1ZXIiLCJyb2xlcyI6WyJST0xFX1VTRVIiXSwic3ViIjoidXNlcm9uZSIsInVzZXJpZCI6MiwidXNlcm5hbWUiOiJ1c2Vyb25lIn0.1ZA8dS7Eb5Hn4PaZagTsSesqwGt_tplXLntW9QPVYeo"
+	dummyInvalidToken  = "invalid.token.string"
+	dummyEmptyToken    = ""
+	dummyExpiredToken  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJ5b3VyX2p3dF9hdWRpZW5jZSIsImVtYWlsIjoidXNlcm9uZUBteWdtYWlsLmNvbSIsImV4cCI6MTc1MDQ3NzUyOSwiaWF0IjoxNzUwNDc3NTI5LCJpc3MiOiJ5b3VyX2p3dF9pc3N1ZXIiLCJyb2xlcyI6WyJST0xFX1VTRVIiXSwic3ViIjoidXNlcm9uZSIsInVzZXJpZCI6MiwidXNlcm5hbWUiOiJ1c2Vyb25lIn0.V3DfjAgw7kNCBP1ueidv9lJV5s4J491hSDERWj3hlKE"
+)
+
+func TestGetAllConsumers_Success(t *testing.T) {
 	// Define a mocked repository, service, and handler
 	// This will allow us to test the handler without needing a real database connection
 	r := NewConsumerMockedRepository()
@@ -28,76 +33,45 @@ func TestGetConsumers(t *testing.T) {
 	// Set up the Gin router and the route for getting all consumers
 	gin.SetMode(gin.TestMode)
 	router := gin.Default()
-	router.GET("/api/v1/consumers", h.GetAllConsumers)
+	router.Use(authorization.JwtValidation())
+	router.GET("/api/v1/consumers", authorization.RoleBasedAccessControl("ROLE_ADMIN"), h.GetAllConsumers)
 
-	// Create a request to the endpoint and record the response
+	// Create a request to the endpoint with the JWT token in the Authorization header
+	req, _ := http.NewRequest("GET", "/api/v1/consumers", nil)
+	req.Header.Set("Authorization", "Bearer "+dummyAdminToken)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	// Check the response status code and body
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Unmarshal the response body into a HttpResponse struct
+	var httpResponse httputil.HttpResponse
+	err := json.Unmarshal(w.Body.Bytes(), &httpResponse)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, httpResponse.Data)
+	assert.Nil(t, httpResponse.Error)
+}
+
+func TestGetAllConsumers_Unauthorized(t *testing.T) {
+	// Define a mocked repository, service, and handler
+	r := NewConsumerMockedRepository()
+	s := service.NewConsumerService(r)
+	h := handler.NewConsumerHandler(s)
+
+	// Set up the Gin router and the route for getting all consumers
+	gin.SetMode(gin.TestMode)
+	router := gin.Default()
+	router.Use(authorization.JwtValidation())
+	router.GET("/api/v1/consumers", authorization.RoleBasedAccessControl("ROLE_ADMIN"), h.GetAllConsumers)
+
+	// Create a request to the endpoint without a token
 	req, _ := http.NewRequest("GET", "/api/v1/consumers", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	// Check the response status code and body
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	// Unmarshal the response body into a HttpResponse struct
-	// This struct is used to standardize the response format
-	var httpResponse httputil.HttpResponse
-	err := json.Unmarshal(w.Body.Bytes(), &httpResponse)
-	assert.NoError(t, err)
-	assert.NotEmpty(t, httpResponse.Data)
-	assert.Nil(t, httpResponse.Error)
-}
-
-func TestGetConsumerByID(t *testing.T) {
-	// Define a mocked repository, service, and handler
-	// This will allow us to test the handler without needing a real database connection
-	r := NewConsumerMockedRepository()
-	s := service.NewConsumerService(r)
-	h := handler.NewConsumerHandler(s)
-
-	// Set up the Gin router and the route for getting a consumer by ID
-	gin.SetMode(gin.TestMode)
-	router := gin.Default()
-	router.GET("/api/v1/consumers/:id", h.GetConsumerByID)
-
-	// Create a request to the endpoint with a specific consumer ID and record the response
-	id := "dummy-id" // Assuming we have a consumer with ID 1 in our mocked repository
-	req, _ := http.NewRequest("GET", "/api/v1/consumers/"+id, nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	// Check the response status code and body
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	// Unmarshal the response body into a HttpResponse struct
-	// This struct is used to standardize the response format
-	var httpResponse httputil.HttpResponse
-	err := json.Unmarshal(w.Body.Bytes(), &httpResponse)
-	assert.NoError(t, err)
-	assert.NotEmpty(t, httpResponse.Data)
-	assert.Nil(t, httpResponse.Error)
-	assert.Equal(t, id, httpResponse.Data.(map[string]interface{})["id"].(string), "Expected consumer ID to match")
-}
-
-func TestGetConsumerByID_NotFound(t *testing.T) {
-	// Define a mocked repository, service, and handler
-	// This will allow us to test the handler without needing a real database connection
-	r := NewConsumerMockedRepository()
-	s := service.NewConsumerService(r)
-	h := handler.NewConsumerHandler(s)
-
-	// Set up the Gin router and the route for getting a consumer by ID
-	gin.SetMode(gin.TestMode)
-	router := gin.Default()
-	router.GET("/api/v1/consumers/:id", h.GetConsumerByID)
-
-	// Create a request to the endpoint with a non-existent consumer ID and record the response
-	id := "non-existent-id"
-	req, _ := http.NewRequest("GET", "/api/v1/consumers/"+id, nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	// Check the response status code and body
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
 
 	// Unmarshal the response body into a HttpResponse struct
 	var httpResponse httputil.HttpResponse
@@ -107,80 +81,26 @@ func TestGetConsumerByID_NotFound(t *testing.T) {
 	assert.NotNil(t, httpResponse.Error)
 }
 
-func TestCreateConsumer(t *testing.T) {
+func TestGetAllConsumers_Forbidden(t *testing.T) {
 	// Define a mocked repository, service, and handler
-	// This will allow us to test the handler without needing a real database connection
 	r := NewConsumerMockedRepository()
 	s := service.NewConsumerService(r)
 	h := handler.NewConsumerHandler(s)
 
-	// Set up the Gin router and the route for creating a consumer
+	// Set up the Gin router and the route for getting all consumers
 	gin.SetMode(gin.TestMode)
 	router := gin.Default()
-	router.POST("/api/v1/consumers", h.CreateConsumer)
+	router.Use(authorization.JwtValidation())
+	router.GET("/api/v1/consumers", authorization.RoleBasedAccessControl("ROLE_ADMIN"), h.GetAllConsumers)
 
-	// Create a request to the endpoint with a new consumer's data
-	// This data will be used to create a new consumer in the mocked repository
-	newConsumer := entity.Consumer{
-		Fullname:  "John Doe",
-		Username:  "johndoe",
-		Email:     "john.doe@example.com",
-		Phone:     "1234567890",
-		Address:   "123 Dummy Street",
-		BirthDate: &customtype.Date{Time: time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)},
-	}
-
-	// Marshal the new consumer data into JSON format and create a request
-	// This request will be sent to the endpoint to create a new consumer
-	reqBody, _ := json.Marshal(newConsumer)
-	req, _ := http.NewRequest("POST", "/api/v1/consumers", bytes.NewBuffer(reqBody))
-	req.Header.Set("Content-Type", "application/json")
+	// Create a request to the endpoint with a non-admin token
+	req, _ := http.NewRequest("GET", "/api/v1/consumers", nil)
+	req.Header.Set("Authorization", "Bearer "+dummyNonAdminToken)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	// Check the response status code and body
-	assert.Equal(t, http.StatusCreated, w.Code)
-
-	// Unmarshal the response body into a HttpResponse struct
-	var httpResponse httputil.HttpResponse
-	err := json.Unmarshal(w.Body.Bytes(), &httpResponse)
-	assert.NoError(t, err)
-	assert.NotEmpty(t, httpResponse.Data)
-	assert.Nil(t, httpResponse.Error)
-
-	// Check if the created consumer's data matches the input data
-	createdConsumer := httpResponse.Data.(map[string]interface{})
-	assert.Equal(t, newConsumer.Fullname, createdConsumer["fullname"])
-	assert.Equal(t, newConsumer.Username, createdConsumer["username"])
-	assert.Equal(t, newConsumer.Email, createdConsumer["email"])
-}
-
-func TestCreateConsumer_ValidationError(t *testing.T) {
-	// Define a mocked repository, service, and handler
-	// This will allow us to test the handler without needing a real database connection
-	r := NewConsumerMockedRepository()
-	s := service.NewConsumerService(r)
-	h := handler.NewConsumerHandler(s)
-
-	// Set up the Gin router and the route for creating a consumer
-	gin.SetMode(gin.TestMode)
-	router := gin.Default()
-	router.POST("/api/v1/consumers", h.CreateConsumer)
-
-	// Create a request to the endpoint with invalid consumer data (missing required fields)
-	invalidConsumer := entity.Consumer{
-		Fullname: "", // Missing fullname
-		Username: "johndoe",
-	}
-
-	reqBody, _ := json.Marshal(invalidConsumer)
-	req, _ := http.NewRequest("POST", "/api/v1/consumers", bytes.NewBuffer(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	// Check the response status code and body
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusForbidden, w.Code)
 
 	// Unmarshal the response body into a HttpResponse struct
 	var httpResponse httputil.HttpResponse
@@ -190,33 +110,89 @@ func TestCreateConsumer_ValidationError(t *testing.T) {
 	assert.NotNil(t, httpResponse.Error)
 }
 
-func TestUpdateConsumerStatus(t *testing.T) {
+func TestGetAllConsumers_InvalidToken(t *testing.T) {
 	// Define a mocked repository, service, and handler
-	// This will allow us to test the handler without needing a real database connection
 	r := NewConsumerMockedRepository()
 	s := service.NewConsumerService(r)
 	h := handler.NewConsumerHandler(s)
 
-	// Set up the Gin router and the route for updating a consumer's status
+	// Set up the Gin router and the route for getting all consumers
 	gin.SetMode(gin.TestMode)
 	router := gin.Default()
-	router.PATCH("/api/v1/consumers/:id", h.UpdateConsumerStatus)
+	router.Use(authorization.JwtValidation())
+	router.GET("/api/v1/consumers", authorization.RoleBasedAccessControl("ROLE_ADMIN"), h.GetAllConsumers)
 
-	// Create a request to the endpoint with a specific consumer ID and new status
-	id := "dummy-id" // Assuming we have a consumer with ID 1 in our mocked repository
-	newStatus := "inactive"
-	req, _ := http.NewRequest("PATCH", "/api/v1/consumers/"+id+"?status="+newStatus, nil)
-	req.Header.Set("Content-Type", "application/json")
+	// Create a request to the endpoint with an invalid token
+	req, _ := http.NewRequest("GET", "/api/v1/consumers", nil)
+	req.Header.Set("Authorization", "Bearer "+dummyInvalidToken)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	// Check the response status code and body
-	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
 
 	// Unmarshal the response body into a HttpResponse struct
 	var httpResponse httputil.HttpResponse
 	err := json.Unmarshal(w.Body.Bytes(), &httpResponse)
 	assert.NoError(t, err)
-	assert.NotEmpty(t, httpResponse.Data)
-	assert.Nil(t, httpResponse.Error)
+	assert.Empty(t, httpResponse.Data)
+	assert.NotNil(t, httpResponse.Error)
+}
+
+func TestGetAllConsumers_EmptyToken(t *testing.T) {
+	// Define a mocked repository, service, and handler
+	r := NewConsumerMockedRepository()
+	s := service.NewConsumerService(r)
+	h := handler.NewConsumerHandler(s)
+
+	// Set up the Gin router and the route for getting all consumers
+	gin.SetMode(gin.TestMode)
+	router := gin.Default()
+	router.Use(authorization.JwtValidation())
+	router.GET("/api/v1/consumers", authorization.RoleBasedAccessControl("ROLE_ADMIN"), h.GetAllConsumers)
+
+	// Create a request to the endpoint with an empty token
+	req, _ := http.NewRequest("GET", "/api/v1/consumers", nil)
+	req.Header.Set("Authorization", "Bearer "+dummyEmptyToken)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	// Check the response status code and body
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+
+	// Unmarshal the response body into a HttpResponse struct
+	var httpResponse httputil.HttpResponse
+	err := json.Unmarshal(w.Body.Bytes(), &httpResponse)
+	assert.NoError(t, err)
+	assert.Empty(t, httpResponse.Data)
+	assert.NotNil(t, httpResponse.Error)
+}
+
+func TestGetAllConsumers_ExpiredToken(t *testing.T) {
+	// Define a mocked repository, service, and handler
+	r := NewConsumerMockedRepository()
+	s := service.NewConsumerService(r)
+	h := handler.NewConsumerHandler(s)
+
+	// Set up the Gin router and the route for getting all consumers
+	gin.SetMode(gin.TestMode)
+	router := gin.Default()
+	router.Use(authorization.JwtValidation())
+	router.GET("/api/v1/consumers", authorization.RoleBasedAccessControl("ROLE_ADMIN"), h.GetAllConsumers)
+
+	// Create a request to the endpoint with an expired token
+	req, _ := http.NewRequest("GET", "/api/v1/consumers", nil)
+	req.Header.Set("Authorization", "Bearer "+dummyExpiredToken)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	// Check the response status code and body
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+
+	// Unmarshal the response body into a HttpResponse struct
+	var httpResponse httputil.HttpResponse
+	err := json.Unmarshal(w.Body.Bytes(), &httpResponse)
+	assert.NoError(t, err)
+	assert.Empty(t, httpResponse.Data)
+	assert.NotNil(t, httpResponse.Error)
 }

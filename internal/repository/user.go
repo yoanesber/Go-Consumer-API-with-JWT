@@ -11,11 +11,9 @@ import (
 // Interface for user repository
 // This interface defines the methods that the user repository should implement
 type UserRepository interface {
-	GetAllUsers(tx *gorm.DB, page int, limit int) ([]entity.User, error)
 	GetUserByID(tx *gorm.DB, id int64) (entity.User, error)
 	GetUserByUsername(tx *gorm.DB, username string) (entity.User, error)
 	GetUserByEmail(tx *gorm.DB, email string) (entity.User, error)
-	CreateUser(tx *gorm.DB, user entity.User) (entity.User, error)
 	UpdateUser(tx *gorm.DB, user entity.User) (entity.User, error)
 }
 
@@ -27,22 +25,6 @@ type userRepository struct{}
 // It initializes the userRepository struct and returns it.
 func NewUserRepository() UserRepository {
 	return &userRepository{}
-}
-
-// GetAllUsers retrieves all users from the database.
-func (r *userRepository) GetAllUsers(tx *gorm.DB, page int, limit int) ([]entity.User, error) {
-	var users []entity.User
-	err := tx.Preload("Roles").
-		Offset((page - 1) * limit).
-		Limit(limit).
-		Order("id ASC").
-		Find(&users).Error
-
-	if err != nil {
-		return nil, err
-	}
-
-	return users, nil
 }
 
 // GetUserByID retrieves a user by its ID from the database.
@@ -79,16 +61,6 @@ func (r *userRepository) GetUserByEmail(tx *gorm.DB, email string) (entity.User,
 
 	if err != nil {
 		return entity.User{}, err
-	}
-
-	return user, nil
-}
-
-// CreateUser inserts a new user into the database and returns the created user.
-func (r *userRepository) CreateUser(tx *gorm.DB, user entity.User) (entity.User, error) {
-	// Insert the new user into the database
-	if err := tx.Create(&user).Error; err != nil {
-		return entity.User{}, fmt.Errorf("failed to create user: %w", err)
 	}
 
 	return user, nil

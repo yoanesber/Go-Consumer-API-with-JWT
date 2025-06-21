@@ -72,26 +72,6 @@ func SetupRouter() *gin.Engine {
 			consumerGroup.POST("", authorization.RoleBasedAccessControl("ROLE_ADMIN"), h.CreateConsumer)
 			consumerGroup.PATCH("/:id", authorization.RoleBasedAccessControl("ROLE_ADMIN"), h.UpdateConsumerStatus)
 		}
-
-		// Routes for user management
-		// These routes handle CRUD operations for users
-		userGroup := v1.Group("/users")
-		{
-			// Initialize the user repository and service
-			// This is where the actual implementation of the repository and service would be used
-			r := repository.NewUserRepository()
-			s := service.NewUserService(r)
-
-			// Initialize the user handler with the service
-			// This handler handles the HTTP requests and responses for user-related operations
-			h := handler.NewUserHandler(s)
-
-			// Define the routes for user management
-			// These routes handle CRUD operations for users
-			userGroup.GET("", authorization.RoleBasedAccessControl("ROLE_ADMIN"), h.GetAllUsers)
-			userGroup.GET("/:id", authorization.RoleBasedAccessControl("ROLE_ADMIN"), h.GetUserByID)
-			userGroup.POST("", authorization.RoleBasedAccessControl("ROLE_ADMIN"), h.CreateUser)
-		}
 	}
 
 	// NoRoute handler for undefined routes
