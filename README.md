@@ -332,6 +332,15 @@ This section provides step-by-step instructions to run the application either **
   - All commands are defined in the `Makefile`.
   - To run using `make`, ensure that `make` is installed on your system.
   - To run the application in containers, make sure `Docker` is installed and running.
+  - Ensure you have `Go` installed on your system
+
+### 📦 Install Dependencies
+
+Make sure all Go modules are properly installed:  
+
+```bash
+make tidy
+```
 
 ### 🧪 Run Unit Tests
 
