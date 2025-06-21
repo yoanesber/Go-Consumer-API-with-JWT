@@ -127,7 +127,7 @@ This project leverages a modern and robust set of technologies to ensure perform
 This project follows a **modular** and **maintainable** architecture inspired by **Clean Architecture** principles. Each domain feature (e.g., **entity**, **handler**, **repository**, **service**) is organized into self-contained modules with clear separation of concerns.
 
 ```bash
-📁 go-idempotency-demo/
+📁 go-consumer-api-with-jwt/
 ├── 📂cert/                                 # Stores self-signed TLS certificates used for local development (e.g., for HTTPS or JWT signing verification)
 ├── 📂cmd/                                  # Contains the application's entry point.
 ├── 📂config/
@@ -143,7 +143,7 @@ This project follows a **modular** and **maintainable** architecture inspired by
 ├── 📂keys/                                 # Contains RSA public/private keys used for signing and verifying JWT tokens
 ├── 📂logs/                                 # Application log files (error, request, info) written and rotated using Logrus + Lumberjack
 ├── 📂pkg/                                  # Reusable utility and middleware packages shared across modules
-│   ├── 📂contextdata/                      # Stores and retrieves contextual data like Idempotency-Key, UserID, RequestID
+│   ├── 📂contextdata/                      # Stores and retrieves contextual data like User Information
 │   ├── 📂customtype/                       # Defines custom types, enums, constants used throughout the application
 │   ├── 📂diagnostics/                      # Health check endpoints, metrics, and diagnostics handlers for monitoring
 │   ├── 📂logger/                           # Centralized log initialization and configuration
