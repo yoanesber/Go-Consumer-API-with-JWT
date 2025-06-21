@@ -20,6 +20,11 @@ POSTGRES_DB=consumer_service
 NETWORK=app-network
 
 ## ---- Development Commands ----
+# Install dependencies
+tidy:
+	@echo -e "Running go mod tidy..."
+	@go mod tidy
+
 # Run the application in development mode
 run:
 	@echo -e "Running the application..."
@@ -96,7 +101,7 @@ docker-down: docker-remove-app \
 	docker-remove-postgres \
 	docker-remove-network
 
-.PHONY: run test \
+.PHONY: tidy run test \
 	docker-create-network docker-remove-network \
 	docker-build-postgres docker-run-postgres docker-build-run-postgres docker-remove-postgres \
 	docker-build-app docker-run-app docker-build-run-app docker-remove-app \
